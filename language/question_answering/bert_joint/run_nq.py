@@ -851,6 +851,23 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
   batch_size = final_hidden_shape[0]
   seq_length = final_hidden_shape[1]
   hidden_size = final_hidden_shape[2]
+    
+  lstm_output_weights = tf.get_variable(
+      "lstm/output_weights", [batch_size*seq_length,hidden_size],
+      initializer=tf.truncated_normal_initializer(stddev=0.02))
+
+  lstm_output_bias = tf.get_variable(
+      "lstm/output_bias", [hidden_size], initializer=tf.zeros_initializer())
+
+  lstm_input = tf.unstack(final_hidden,axis=1)
+  lstm_cell = rnn.BasicLSTMCell(hidden_size, forget_bias=1.0)
+  outputs, states = rnn.static_rnn(lstm_cell, lstm_input, dtype=tf.float32)
+     
+  final_hidden = tf.matmul(outputs[-1], lstm_output_weights) + lstm_output_bias
+
+  final_hidden_shape = modeling.get_shape_list(final_hidden, expected_rank=2)
+  bs = final_hidden_shape[0] #batch_size * seq_length
+  hidden_size = final_hidden_shape[1]
 
   output_weights = tf.get_variable(
       "cls/nq/output_weights", [2, hidden_size],
@@ -860,13 +877,12 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
       "cls/nq/output_bias", [2], initializer=tf.zeros_initializer())
 
   final_hidden_matrix = tf.reshape(final_hidden,
-                                   [batch_size * seq_length, hidden_size])
+                                   [bs, hidden_size])
   logits = tf.matmul(final_hidden_matrix, output_weights, transpose_b=True)
   logits = tf.nn.bias_add(logits, output_bias)
 
-  logits = tf.reshape(logits, [batch_size, seq_length, 2])
-  logits = tf.transpose(logits, [2, 0, 1])
-
+  logits = tf.reshape(logits, [bs, 2])
+  logits = tf.transpose(logits, [1, 0])
   unstacked_logits = tf.unstack(logits, axis=0)
 
   (start_logits, end_logits) = (unstacked_logits[0], unstacked_logits[1])
